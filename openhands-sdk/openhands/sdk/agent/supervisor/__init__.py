@@ -11,6 +11,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from openhands.sdk import Agent
+from openhands.sdk.agent.codegen_pool import (
+    create_codegen_pool,
+)
+from openhands.sdk.agent.evaluator import (
+    create_evaluator_agent,
+)
+from openhands.sdk.agent.repair import (
+    create_repair_agent,
+)
 from openhands.sdk.agent.supervisor.decision_engine import (
     Decision,
     DecisionEngine,
@@ -229,6 +238,9 @@ class SupervisorAgent(Agent):
             task_graph = await self._coordinate(spec)
             self._current_task_graph = task_graph
 
+            llm = getattr(self, "llm", None)
+            l3_results = await self._execute_l3_workflow(spec, task_graph, llm)
+
             self._state_machine.transition(WorkflowState.COMPLETED)
 
             return {
@@ -237,6 +249,9 @@ class SupervisorAgent(Agent):
                 "task_graph": task_graph,
                 "requirements": requirements,
                 "validation": validation_result,
+                "candidates": l3_results.get("candidates", []),
+                "best_candidate": l3_results.get("best_candidate"),
+                "repair_history": l3_results.get("repair_history", []),
                 "state": self._state_machine.current_state.value,
             }
 
@@ -428,6 +443,104 @@ class SupervisorAgent(Agent):
         self._state_machine.transition(WorkflowState.EXECUTING_TASKS)
 
         return task_graph
+
+    async def _execute_l3_workflow(
+        self,
+        spec: FormalSpec,
+        task_graph: TaskGraph,  # noqa: ARG002
+        llm: Any | None = None,
+    ) -> dict[str, Any]:
+        """Execute L3 micro layer workflow: CodeGen -> Evaluator -> Repair.
+
+        This method coordinates:
+        1. CodeGenAgentPool - generates code candidates
+        2. EvaluatorAgent - evaluates and ranks candidates
+        3. RepairAgent - repairs failed candidates (if needed)
+
+        Args:
+            spec: The formal specification
+            task_graph: The task graph
+            llm: Optional LLM instance for code generation
+
+        Returns:
+            Dictionary with execution results
+        """
+        self._state_machine.transition(WorkflowState.EXECUTING_TASKS)
+
+        codegen_pool = create_codegen_pool()
+        evaluator = create_evaluator_agent()
+        repair_agent = create_repair_agent()
+
+        results = {
+            "candidates": [],
+            "evaluations": {},
+            "best_candidate": None,
+            "repair_history": [],
+        }
+
+        task_description = f"Implement specification: {spec.name}\n{spec.description}"
+
+        if llm is not None:
+            candidates = await codegen_pool.generate(
+                spec=spec.content,
+                task_description=task_description,
+                llm=llm,
+            )
+            results["candidates"] = candidates
+
+            if candidates:
+                evaluations = await evaluator.evaluate(
+                    candidates=candidates,
+                    spec=spec.content,
+                )
+                results["evaluations"] = evaluations
+
+                best = evaluator.get_best(candidates)
+                results["best_candidate"] = best
+
+                max_retries = 3
+                current_retry = 0
+
+                while current_retry < max_retries:
+                    if best is None or best.score is None or best.score < 0.5:
+                        if best is not None:
+                            feedback_result = {
+                                "passed": False,
+                                "errors": [{"message": f"Low score: {best.score}"}],
+                            }
+                            repaired = await repair_agent.repair(
+                                candidate=best,
+                                verification_result=feedback_result,
+                            )
+                            if repaired:
+                                results["repair_history"].append(
+                                    {
+                                        "original_id": best.id,
+                                        "repaired_id": repaired.id,
+                                    }
+                                )
+                                candidates.append(repaired)
+                                evaluations = await evaluator.evaluate(
+                                    candidates=candidates,
+                                    spec=spec.content,
+                                )
+                                results["evaluations"] = evaluations
+                                best = evaluator.get_best(candidates)
+                                results["best_candidate"] = best
+                    else:
+                        break
+
+                    current_retry += 1
+
+        best_score = (
+            results["best_candidate"].score if results["best_candidate"] else "N/A"
+        )
+        logger.info(
+            f"L3 workflow complete: {len(results['candidates'])} candidates, "
+            f"best score: {best_score}"
+        )
+
+        return results
 
     async def _handle_validation_failure(
         self, validation_result: ValidationResult
