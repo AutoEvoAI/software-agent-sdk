@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from openhands.sdk.agent.planner.load_balancer import (
+    BalancingStrategy,
+    LoadBalancer,
+    create_load_balancer,
+)
 from openhands.sdk.logger import get_logger
 from openhands.sdk.spec import AgentCapability, AgentProfile, TaskNode
 from openhands.sdk.subagent.profile_registry import (
@@ -36,19 +41,38 @@ class DynamicRoleAllocator:
     def __init__(
         self,
         registry: AgentProfileRegistry | None = None,
+        balancing_strategy: BalancingStrategy = BalancingStrategy.LEAST_LOADED,
     ):
         """Initialize the dynamic role allocator.
 
         Args:
             registry: Optional agent profile registry.
-            Uses global registry if not provided.
+                     Uses global registry if not provided.
+            balancing_strategy: Load balancing strategy to use.
         """
         self._registry = registry or get_global_registry()
+        self._load_balancer = create_load_balancer(strategy=balancing_strategy)
+        self._register_all_agents()
+
+    def _register_all_agents(self) -> None:
+        """Register all agents from registry to load balancer."""
+        profiles = self._registry.list_all()
+        for profile in profiles:
+            self._load_balancer.register_agent(
+                agent_id=profile.agent_id,
+                max_capacity=profile.max_concurrent_tasks,
+                capabilities=[cap.value for cap in profile.capabilities],
+            )
 
     @property
     def registry(self) -> AgentProfileRegistry:
         """Get the agent profile registry."""
         return self._registry
+
+    @property
+    def load_balancer(self) -> LoadBalancer:
+        """Get the load balancer."""
+        return self._load_balancer
 
     def allocate(
         self,
@@ -100,6 +124,32 @@ class DynamicRoleAllocator:
 
         return self._select_best_by_load(matching)
 
+    def allocate_with_load_balancer(
+        self,
+        task: TaskNode,
+    ) -> AgentProfile | None:
+        """Allocate using the load balancer.
+
+        Args:
+            task: The task to allocate an agent for
+
+        Returns:
+            The best matching AgentProfile, or None if no suitable agent found
+        """
+        self._register_all_agents()
+
+        result = self._load_balancer.allocate_task(
+            task_requirements={"capabilities": task.required_capabilities}
+        )
+
+        if result.selected_agent_id:
+            profile = self._registry.get(result.selected_agent_id)
+            if profile:
+                profile.increment_load()
+                return profile
+
+        return None
+
     def allocate_batch(
         self,
         tasks: list[TaskNode],
@@ -121,6 +171,36 @@ class DynamicRoleAllocator:
 
             if profile:
                 profile.increment_load()
+
+        return results
+
+    def allocate_batch_with_load_balancer(
+        self,
+        tasks: list[TaskNode],
+    ) -> dict[str, AgentProfile | None]:
+        """Allocate agents for multiple tasks using load balancer.
+
+        Args:
+            tasks: List of tasks to allocate agents for
+
+        Returns:
+            Dictionary mapping task IDs to allocated AgentProfiles
+        """
+        results = {}
+        self._register_all_agents()
+
+        for task in tasks:
+            result = self._load_balancer.allocate_task(
+                task_requirements={"capabilities": task.required_capabilities}
+            )
+
+            profile = None
+            if result.selected_agent_id:
+                profile = self._registry.get(result.selected_agent_id)
+                if profile:
+                    profile.increment_load()
+
+            results[task.id] = profile
 
         return results
 
@@ -169,6 +249,8 @@ class DynamicRoleAllocator:
         Returns:
             True if successful, False if agent not found
         """
+        self._load_balancer.release_task(agent_id)
+
         profile = self._registry.get(agent_id)
         if profile:
             profile.decrement_load()
@@ -184,6 +266,8 @@ class DynamicRoleAllocator:
         all_profiles = self._registry.list_all()
         available = self._registry.find_available()
 
+        lb_stats = self._load_balancer.get_statistics()
+
         return {
             "total_agents": len(all_profiles),
             "available_agents": len(available),
@@ -193,18 +277,31 @@ class DynamicRoleAllocator:
                 if all_profiles
                 else 0.0
             ),
+            "load_balancer": lb_stats,
         }
+
+    def refresh_agents(self) -> None:
+        """Refresh the load balancer with current registry state."""
+        self._load_balancer = create_load_balancer(
+            strategy=BalancingStrategy.LEAST_LOADED
+        )
+        self._register_all_agents()
 
 
 def create_allocator(
     registry: AgentProfileRegistry | None = None,
+    balancing_strategy: BalancingStrategy = BalancingStrategy.LEAST_LOADED,
 ) -> DynamicRoleAllocator:
     """Factory function to create a DynamicRoleAllocator.
 
     Args:
         registry: Optional agent profile registry.
+        balancing_strategy: Load balancing strategy.
 
     Returns:
         A configured DynamicRoleAllocator instance.
     """
-    return DynamicRoleAllocator(registry=registry)
+    return DynamicRoleAllocator(
+        registry=registry,
+        balancing_strategy=balancing_strategy,
+    )

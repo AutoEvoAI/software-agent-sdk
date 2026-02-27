@@ -1,0 +1,105 @@
+---- MODULE {{ spec_name }} ----
+\* Auto-generated TLA+ specification from OpenHands SpecAgent
+\* Version: {{ version }}
+\* Generated at: {{ timestamp }}
+
+EXTENDS Integers, Sequences, TLC
+
+CONSTANTS
+    {% for const in constants %}    {{ const.name }} <- {{ const.value }}
+    {% endfor %}
+
+VARIABLES
+    {% for var in variables %}    {{ var.name }}
+    {% endfor %}
+
+\* =============================================================================
+\* State Variables
+\* =============================================================================
+{% for var in variables %}
+{{ var.name }} :: {{ var.type }}
+{% endfor %}
+
+\* =============================================================================
+\* Initial State
+\* =============================================================================
+Init ==
+    /\ {% for var in variables %}{{ var.name }} = {{ var.initial_value }}{% if not loop.last %} /\{% endif %}
+    {% endfor %}
+
+\* =============================================================================
+\* Next State Relation
+\* =============================================================================
+Next ==
+    \/ Spec_Transition
+    \/ UNCHANGED <<{% for var in variables %}{{ var.name }}{% if not loop.last %}, {% endif %}{% endfor %>>
+
+\* =============================================================================
+\* Specification Transition
+\* =============================================================================
+Spec_Transition ==
+    {% for transition in transitions %}
+    \/ {{ transition.name }}_Action
+    {% endfor %}
+
+{% for transition in transitions %}
+{{ transition.name }}_Action ==
+    /\ {{ transition.precondition }}
+    /\ {{ transition.postcondition }}
+    /\ LET new_{{ transition.variable }} = {{ transition.expression }} IN
+       /\\ {{ transition.variable }}' = new_{{ transition.variable }}
+    {% endfor %}
+
+\* =============================================================================
+\* Invariants (Safety Properties)
+\* =============================================================================
+{% if invariants %}
+TypeInvariant ==
+    {% for inv in invariants %}
+    /\ {{ inv }}
+    {% endfor %}
+
+{% endif %}
+
+{% if safety_properties %}
+SafetyProperty ==
+    {% for prop in safety_properties %}
+    /\ {{ prop }}
+    {% endfor %}
+
+{% endif %}
+
+\* =============================================================================
+\* Liveness Properties
+\* =============================================================================
+{% if liveness_properties %}
+{% for prop in liveness_properties %}
+{{ prop.name }} ==
+    {{ prop.definition }}
+{% endfor %}
+
+{% endif %}
+
+\* =============================================================================
+\* Helper Operators
+\* =============================================================================
+{% for helper in helpers %}
+{{ helper.name }} ==
+    {{ helper.definition }}
+
+{% endfor %}
+
+\* =============================================================================
+\* Model Checking Configuration
+\* =============================================================================
+\* The following section provides the complete specification for TLC model checking
+Spec == Init /\ [][Next]_vars
+
+{% if liveness_properties %}
+LiveSpec == Spec /\ SF_vars({{ liveness_properties[0].name }})
+{% endif %}
+
+\* =============================================================================
+\* End of Specification
+\* =============================================================================
+====
