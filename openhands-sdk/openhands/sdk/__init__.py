@@ -47,6 +47,16 @@ from openhands.sdk.mcp import (
     create_mcp_tools,
 )
 from openhands.sdk.plugin import Plugin
+from openhands.sdk.spec import (
+    AgentCapability,
+    AgentProfile,
+    FormalSpec,
+    SpecType,
+    TaskGraph,
+    TaskNode,
+    TaskPriority,
+    TaskStatus,
+)
 from openhands.sdk.subagent import (
     agent_definition_to_factory,
     load_agents_from_dir,
@@ -114,6 +124,14 @@ __all__ = [
     "FileStore",
     "LocalFileStore",
     "Plugin",
+    "FormalSpec",
+    "SpecType",
+    "TaskGraph",
+    "TaskNode",
+    "TaskStatus",
+    "TaskPriority",
+    "AgentProfile",
+    "AgentCapability",
     "register_tool",
     "resolve_tool",
     "list_registered_tools",

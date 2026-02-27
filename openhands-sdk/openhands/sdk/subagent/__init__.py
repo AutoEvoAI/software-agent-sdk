@@ -3,6 +3,14 @@ from openhands.sdk.subagent.load import (
     load_project_agents,
     load_user_agents,
 )
+from openhands.sdk.subagent.profile_registry import (
+    AgentProfileRegistry,
+    find_profiles_by_capabilities,
+    get_global_registry,
+    get_profile,
+    register_profile,
+    register_profile_if_absent,
+)
 from openhands.sdk.subagent.registry import (
     agent_definition_to_factory,
     get_agent_factory,
@@ -30,4 +38,11 @@ __all__ = [
     # Agent def and factory
     "AgentDefinition",
     "agent_definition_to_factory",
+    # Agent profile registry
+    "AgentProfileRegistry",
+    "get_global_registry",
+    "get_profile",
+    "register_profile",
+    "register_profile_if_absent",
+    "find_profiles_by_capabilities",
 ]
