@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field, field_validator
 
 from openhands.agent_server.utils import OpenHandsUUID, utc_now
 from openhands.sdk import LLM, AgentBase, Event, ImageContent, Message, TextContent
+
+# Import SupervisorAgent to register it for deserialization
+from openhands.sdk.agent.supervisor import SupervisorAgent  # noqa: F401
 from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
